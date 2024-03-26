@@ -1,0 +1,14 @@
+{
+ "simbox_xsize" : 2.0,
+ "simbox_ysize" : 2.0,
+ "simbox_zsize" : 2.0,
+ "output_mesh_name" : "t1.stl",
+ "mc_field_value": 1.21,
+ "num_additional_steps" : 5,
+ "periodic": true,
+ "show_viewer": true,
+ "step_num" : [80, 80, 80],
+ "capsules" : [
+  {"start" : [0.2, 0.2, 0.0], "end" : [0.75, 0.634, 0.75], "radius" : 0.13}
+ ]
+}
