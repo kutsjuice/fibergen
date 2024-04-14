@@ -28,6 +28,7 @@
 #include <vtkCubeSource.h>
 #include <vtkTriangle.h>
 #include <vtkSTLWriter.h>
+#include <vtkMassProperties.h>
 
 #include <cmath>
 #include <iostream>
@@ -113,6 +114,12 @@ int main(int argc, char** argv) {
   json input_json = json::parse(input_file);
   auto set_dvar_from_json_if_exists =
         [&input_json](const std::string field_name, double &field) {
+      auto field_name_iter = input_json.find(field_name);
+      if (field_name_iter != input_json.end()) field = *field_name_iter;
+    };
+
+  auto set_fvar_from_json_if_exists =
+        [&input_json](const std::string field_name, float &field) {
       auto field_name_iter = input_json.find(field_name);
       if (field_name_iter != input_json.end()) field = *field_name_iter;
     };
@@ -231,9 +238,19 @@ int main(int argc, char** argv) {
   //omp_set_num_threads(num_threads);
   std::cout << "num threads is " << num_threads << std::endl;
 
-
-  vtkIdType total_grid_steps = step_num_final[2]*step_num_final[2]*step_num_final[0];
+  vtkIdType total_grid_steps = step_num_final[2]*step_num_final[1]*step_num_final[0];
   std::vector<float> field_raw_data(total_grid_steps);
+
+  float mutate_weight = 1.0f;
+  set_fvar_from_json_if_exists("functional_mutate_weight", mutate_weight);
+  std::cout << "mut_w = " << mutate_weight << '\n';
+
+  float normal_weight = 0.0f;
+  set_fvar_from_json_if_exists("functional_normal_weight", normal_weight);
+  std::cout << "norm_w = " << normal_weight << '\n';
+
+  float field_power = 2.0f;
+  set_fvar_from_json_if_exists("field_power", field_power);
 
   #pragma omp parallel for schedule(dynamic) num_threads(num_threads)
   for ( int k=0; k<step_num_final[2]; k++){
@@ -252,10 +269,6 @@ int main(int argc, char** argv) {
       int j_offset = j * step_num_final[1];
 
       for (int i=0; i<step_num_final[0]; i++)  {
-        //  for (int k=0; k<step_num_final[2]; k++){
-        //    for (int j=0; j<step_num_final[1]; j++) {
-        //      for (int i=0; i<step_num_final[0]; i++) {
-        // int thread_id = omp_get_thread_num()
         int i_offset = i + k_offset + j_offset;
 
         if (i<zb_steps || j<zb_steps || k<zb_steps
@@ -267,19 +280,20 @@ int main(int argc, char** argv) {
         } else {
           field_value  = 0.0f;
 
-          pe[0]  =   i * step_size[0] + simbox_min[0];
-          pe[1]  =   j * step_size[1] + simbox_min[1];
-          pe[2]  =   k * step_size[2] + simbox_min[2];
+          pe[0] = i * step_size[0] + simbox_min[0];
+          pe[1] = j * step_size[1] + simbox_min[1];
+          pe[2] = k * step_size[2] + simbox_min[2];
 
           for (auto const &capsule : capsules) {
-            pa  = pe  - capsule.start;
-            ba  = capsule.end - capsule.start;
-            dot_pa_ba  = pa .dot(ba );
-            dot_ba_ba  = ba .dot(ba );
-            h  = clamp(dot_pa_ba /dot_ba_ba , 0.0f, 1.0f);
-            res  = pa  - ba *h ;
+            pa = pe - capsule.start;
+            ba = capsule.end - capsule.start;
+            dot_pa_ba = pa.dot(ba);
+            dot_ba_ba = ba.dot(ba);
+            h = clamp(dot_pa_ba/dot_ba_ba, 0.0f, 1.0f);
+            res = pa  - ba*h ;
             cr  = 0.000001 + res.norm();
-            field_value  += std::pow(capsule.radius/cr , 4);
+            field_value += (capsule.radius/cr)*normal_weight
+                           + mutate_weight*std::pow(capsule.radius/cr, field_power);
           }
         }
 
@@ -333,6 +347,22 @@ int main(int argc, char** argv) {
     surface_points->SetPoint(i, vtx);
     //surface_polydata->AddCellReference();
   }
+
+  vtkNew<vtkMassProperties> massProps;
+  massProps->SetInputData(surface_polydata);
+  massProps->Update();
+  std::cout << "Volume: " << massProps->GetVolume() << std::endl
+              << "    VolumeX: " << massProps->GetVolumeX() << std::endl
+              << "    VolumeY: " << massProps->GetVolumeY() << std::endl
+              << "    VolumeZ: " << massProps->GetVolumeZ() << std::endl
+              << "Area:   " << massProps->GetSurfaceArea() << std::endl
+              << "    MinCellArea: " << massProps->GetMinCellArea()
+              << std::endl
+              << "    MinCellArea: " << massProps->GetMaxCellArea()
+              << std::endl
+              << "NormalizedShapeIndex: "
+              << massProps->GetNormalizedShapeIndex() << std::endl;
+
 
   vtkNew<vtkActor> actor;
   actor->SetMapper(mapper);
